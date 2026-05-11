@@ -19,32 +19,24 @@ os.environ["PATH"] = str(dll_dir) + os.pathsep + os.environ["PATH"]
 os.add_dll_directory(str(dll_dir))
 import fluidsynth
 
-NOTE_TO_MIDI = {
-  "A0":21,"A#0":22,"B0":23,
-  "C1":24,"C#1":25,"D1":26,"D#1":27,"E1":28,"F1":29,"F#1":30,"G1":31,"G#1":32,"A1":33,"A#1":34,"B1":35,
-  "C2":36,"C#2":37,"D2":38,"D#2":39,"E2":40,"F2":41,"F#2":42,"G2":43,"G#2":44,"A2":45,"A#2":46,"B2":47,
-  "C3":48,"C#3":49,"D3":50,"D#3":51,"E3":52,"F3":53,"F#3":54,"G3":55,"G#3":56,"A3":57,"A#3":58,"B3":59,
-  "C4":60,"C#4":61,"D4":62,"D#4":63,"E4":64,"F4":65,"F#4":66,"G4":67,"G#4":68,"A4":69,"A#4":70,"B4":71,
-  "C5":72,"C#5":73,"D5":74,"D#5":75,"E5":76,"F5":77,"F#5":78,"G5":79,"G#5":80,"A5":81,"A#5":82,"B5":83,
-  "C6":84,"C#6":85,"D6":86,"D#6":87,"E6":88,"F6":89,"F#6":90,"G6":91,"G#6":92,"A6":93,"A#6":94,"B6":95,
-  "C7":96,"C#7":97,"D7":98,"D#7":99,"E7":100,"F7":101,"F#7":102,"G7":103,"G#7":104,"A7":105,"A#7":106,"B7":107,
-  "C8":108
-}
+NOTE_TO_MIDI = {}
+for octave in range(0, 8):
+    base = {"C":0,"D":2,"E":4,"F":5,"G":7,"A":9,"B":11}
+    sharps = {"C#":1,"D#":3,"F#":6,"G#":8,"A#":10,"A#":10,"B#":0}
+    for name, semi in {**base, **sharps}.items():
+        midi_num = 12 * (octave + 1) + semi
+        NOTE_TO_MIDI[f"{name}{octave}"] = midi_num
+
 MIDI_TO_NOTE = {v: k for k, v in NOTE_TO_MIDI.items()}
 
-# {
-#     "C2":36,"D2":38,"E2":40,"F2":41,"G2":43,"A2":45,"B2":47,
-#     "C3":48,"D3":50,"E3":52,"F3":53,"G3":55,"A3":57,"B3":59,
-#     "C4":60,"D4":62,"E4":64,"F4":65,"G4":67,"A4":69,"B4":71,
-#     "C5":72,"D5":74,"E5":76,"F5":77,"G5":79,"A5":81,"B5":83,
-#     "C6":84,"D6":86,"E6":88,"F6":89,"G6":91,"A6":93,"B6":95,
-#     # 升号音符
-#     "C#4":61,"D#4":63,"F#4":66,"G#4":68,"A#4":70,
-#     "C#5":73,"D#5":75,"F#5":78,"G#5":80,"A#5":82,
-# }
+extra = {61:"C#4",63:"D#4",66:"F#4",68:"G#4",70:"A#4",
+         73:"C#5",75:"D#5",78:"F#5",80:"G#5",82:"A#5",
+         85:"C#6",87:"D#6",90:"F#6",92:"G#6",94:"A#6"}
+MIDI_TO_NOTE.update(extra)
 
 class Toccata():
-    def __init__(self, score_path:str, sf2_path:str):
+    def __init__(self, score_path:str, sf2_path:str, bpm = 120.0):
+        self.beat_duration = 60.0/bpm
         self.cursor = 0
         self.lock = threading.Lock()
 
@@ -79,7 +71,7 @@ class Toccata():
         self.fs.program_select(self.channel, self.sfid, bank=0, preset=0)
 
         # note delay persec
-        self.note_duration = 1.5
+        self.note_duration = 1.8
 
         print(f"[Toccata] scores total: {len(self.score)} ✓")
 
@@ -90,9 +82,16 @@ class Toccata():
             return data
         return [{"note": n, "duration": 0.8} for n in data]
 
-    def _play_note(self, midi_pitch:int, duration:float):
+    # def _play_note(self, midi_pitch:int, duration:float):
+    #     self.fs.noteon(self.channel, midi_pitch, 100)
+    #     timer = threading.Timer(duration, self.fs.noteoff, (self.channel, midi_pitch))
+    #     timer.daemon = True
+    #     timer.start()
+
+    def _play_note(self, midi_pitch, duration_beats):
+        duration_sec = duration_beats * self.beat_duration
         self.fs.noteon(self.channel, midi_pitch, 100)
-        timer = threading.Timer(duration, self.fs.noteoff, (self.channel, midi_pitch))
+        timer = threading.Timer(duration_sec, self.fs.noteoff,[self.channel, midi_pitch])
         timer.daemon = True
         timer.start()
 
@@ -103,6 +102,7 @@ class Toccata():
         with self.lock:
             item = self.score[self.cursor]
             self.cursor = (self.cursor + 1) % len(self.score)
+        print(f"[Playing] {item}")
 
         duration = item.get("duration", self.note_duration)
 
@@ -154,7 +154,7 @@ def insert_rests(groups: list, rest_threshold: float = 0.1) -> list:
 if __name__ == "__main__":
     toccata = Toccata(
         # score_path ="scores/score-moli.json",
-        score_path ="scores/scores-顾彬 - 梁祝（钢琴 b曲）.json",
+        score_path ="scores/score-Call of Silence [钢琴].json",
         # sf2_path = "fonts/FluidR3_GM.sf2"
         sf2_path = "fonts/Full Grand Piano.sf2"
         # sf2_path = "scores/aaviolin.sf2"
