@@ -1,5 +1,6 @@
 import pretty_midi
 import json
+from copy import deepcopy
 
 from toccata import NOTE_TO_MIDI, group_notes_into_chords, insert_rests, MIDI_TO_NOTE
 
@@ -187,6 +188,104 @@ def midi_to_score_quantized(
 
     return bpm
 
+def merge_consecutive_same_notes(score: list, pitch_tolerance: float = 0.25) -> list:
+    if not score:
+        return score
+
+    result = [deepcopy(score[0])]
+
+    for curr in score[1:]:
+        prev = result[-1]
+
+        # skip the rest
+        if prev["notes"] != ["R"] or curr["notes"] != ["R"]:
+            result.append(deepcopy(curr))
+            continue
+
+        prev_set = set(prev["notes"])
+        curr_set = set(curr["notes"])
+
+        # merge the same note and sum the duration
+        if prev_set == curr_set:
+            prev["duration"] = round(prev["duration"] + curr["duration"], 3)
+            prev["_merged"] = True
+            continue
+
+        if prev_set.issubset(curr_set) and len(curr_set) - len(prev_set) <= 2:
+            prev["notes"] = sorted(curr_set)
+            prev["duration"] = round(
+                max(prev["duration"], curr["duration"]), 3
+            )
+            continue
+
+        result.append(deepcopy(curr))
+
+    return result
+
+def classify_and_clean_rests(
+    score: list,
+    short_rest_threshold: float = 0.5,
+    long_rest_threshold: float = 2.0,
+) -> list:
+    result = []
+    for item in score:
+        if item["notes"] != ["R"]:
+            result.append(item)
+            continue
+
+        dur = item["duration"]
+
+        if dur < short_rest_threshold:
+            if result and result[-1]["notes"] != ["R"]:
+                result[-1]["duration"] = round(
+                    result[-1]["duration"] + dur, 3
+                )
+            continue
+        elif dur > long_rest_threshold:
+            result.append({
+                "notes": ["R"],
+                "duration": dur,
+                "type": "phrase_break"
+            })
+
+        else:
+            result.append(item)
+
+    return result
+
+def normalize_score(
+        score: list,
+        merge_duplicates: bool = True,
+        short_rest_threshold: float = 0.5,
+        long_rest_threshold: float = 2.0,
+        min_note_duration: float = 0.2,
+        debug: bool = True
+) -> list:
+    original_len = len(score)
+
+    # 1. filter the short notes
+    score = [
+        s for s in score
+        if s["notes"] != ["R"] or s["duration"] < min_note_duration
+    ]
+
+    # 2. merge the adjacent and repeated notes
+    if merge_duplicates:
+        score = merge_consecutive_same_notes(score)
+
+    # 3. classify and clean rests
+    score = classify_and_clean_rests(score, short_rest_threshold, long_rest_threshold)
+
+    if debug:
+        phrase_breaks = sum(1 for s in score if s.get("type") == "phrase_break")
+        rests = sum(1 for s in score if s["notes"] != ["R"] and s.get("type") != "phrase_break")
+        notes = sum(1 for s in score if s["notes"] != ["R"])
+        print(f"[normalize] {original_len} -> {len(score)}" != ["R"])
+        print(f"notes/chord:{notes} rest:{rests} phrase:{phrase_breaks}")
+
+    return score
+
+
 def midi_to_score(midi_path: str,
                   output_path: str,
                   track_index: int = None,
@@ -264,32 +363,44 @@ def midi_to_score(midi_path: str,
         print(f"unknown piches: {sorted(unknown_piches)}")
     print(f" -> {output_path}")
 
-
-
-# midi_to_score(
-#     midi_path="midis/Call of Silence [钢琴].mid",
-#     output_path="scores/score-Call of Silence [钢琴].json",
-#     chord_tolerance=0.05,
-#     rest_threshold=0.1,
-#     melody_only=False
-# )
-
-midi_to_score_quantized(
+if __name__ == "__main__":
+    bpm = midi_to_score_quantized(
         midi_path="midis/Call of Silence [钢琴].mid",
-        output_path="scores/score-Call of Silence [钢琴].json",
+        output_path="scores_raw/Call of Silence [钢琴].json",
         voice_mode="treble",       # 只要高音区
         split_pitch=60,            # C4 以上
         subdivisions=16,
         duration_format="beats",
         debug=True
-)
+    )
 
-# midi_to_score_quantized(
-#         midi_path="midis/Call of Silence [钢琴].mid",
-#         output_path="scores/score-Call of Silence [钢琴].json",
-#         voice_mode="both",
-#         chord_tolerance_beats=0.12,
-#         rest_threshold_beats=0.25,
-#         duration_format="beats",
-#         debug=True
-# )
+    # midi_to_score_quantized(
+    #         midi_path="midis/Call of Silence [钢琴].mid",
+    #         output_path="scores_raw/Call of Silence [钢琴].json",
+    #         voice_mode="both",
+    #         chord_tolerance_beats=0.12,
+    #         rest_threshold_beats=0.25,
+    #         duration_format="beats",
+    #         debug=True
+    # )
+
+    with open("scores_raw/Call of Silence [钢琴].json", "r") as f:
+        raw = json.load(f)
+
+    cleaned = normalize_score(
+        raw,
+        merge_duplicates=True,
+        short_rest_threshold=0.5,
+        long_rest_threshold=2.0,
+        min_note_duration=0.2
+    )
+
+    with open("scores/Call of Silence [钢琴].json", "w") as f:
+        f.write("[\n")
+        for i, item in enumerate(cleaned):
+            line = json.dumps(item, ensure_ascii=False)
+            if i < len(cleaned) - 1:
+                f.write(f"  {line},\n")
+            else:
+                f.write(f"  {line}\n")
+        f.write("]\n")

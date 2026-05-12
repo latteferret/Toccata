@@ -1,5 +1,3 @@
-import ctypes
-import sys
 import os
 import threading
 import keyboard
@@ -100,8 +98,17 @@ class Toccata():
             return
 
         with self.lock:
+            # auto skip all phrase_break
+            while self.cursor < len(self.score):
+                item = self.score[self.cursor]
+                if item.get("type") == "phrase_break":
+                    self.cursor += 1
+                else:
+                    break
+
             item = self.score[self.cursor]
             self.cursor = (self.cursor + 1) % len(self.score)
+
         print(f"[Playing] {item}")
 
         duration = item.get("duration", self.note_duration)
@@ -154,7 +161,7 @@ def insert_rests(groups: list, rest_threshold: float = 0.1) -> list:
 if __name__ == "__main__":
     toccata = Toccata(
         # score_path ="scores/score-moli.json",
-        score_path ="scores/score-Call of Silence [钢琴].json",
+        score_path ="scores/Call of Silence [钢琴].json",
         # sf2_path = "fonts/FluidR3_GM.sf2"
         sf2_path = "fonts/Full Grand Piano.sf2"
         # sf2_path = "scores/aaviolin.sf2"
